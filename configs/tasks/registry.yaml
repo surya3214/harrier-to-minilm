@@ -1,0 +1,42 @@
+# Task registry — v1 activates sts/retrieval/bitext.
+tasks:
+  sts:
+    enabled: true
+    description: Semantic textual similarity pairs
+    student_prompt: sts
+    teacher_prompt_query: sts_query
+    teacher_prompt_doc: document
+  retrieval:
+    enabled: true
+    description: Query-passage retrieval triples
+    student_prompt: ret
+    teacher_prompt_query: web_search_query
+    teacher_prompt_doc: document
+  bitext:
+    enabled: true
+    description: Parallel sentence alignment
+    student_prompt: bitext
+    teacher_prompt_query: bitext_query
+    teacher_prompt_doc: bitext_query
+  # --- later stubs ---
+  clustering:
+    enabled: false
+    description: Clustering corpora (add datasets later)
+    student_prompt: sts
+    teacher_prompt_query: sts_query
+    teacher_prompt_doc: document
+    notes: "Expand with topic-labeled short documents; same shard schema."
+  classification:
+    enabled: false
+    description: Classification label spaces via embedding probes
+    student_prompt: sts
+    teacher_prompt_query: sts_query
+    teacher_prompt_doc: document
+    notes: "Expand with labeled sentence corpora; distill teacher geometry."
+  reranking:
+    enabled: false
+    description: Pairwise / listwise reranking
+    student_prompt: ret
+    teacher_prompt_query: web_search_query
+    teacher_prompt_doc: document
+    notes: "Add Margin-MSE on teacher pairwise scores without schema redesign."

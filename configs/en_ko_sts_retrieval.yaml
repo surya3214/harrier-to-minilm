@@ -1,0 +1,142 @@
+# EN/KO STS + Retrieval distillation config (v1)
+
+models:
+  teacher: microsoft/harrier-oss-v1-0.6b
+  student: nreimers/mMiniLMv2-L12-H384-distilled-from-XLMR-Large
+  teacher_local: artifacts/models/microsoft__harrier-oss-v1-0.6b
+  student_local: artifacts/models/nreimers__mMiniLMv2-L12-H384-distilled-from-XLMR-Large
+
+paths:
+  artifacts_root: artifacts
+  datasets_root: artifacts/hf_datasets
+  models_root: artifacts/models
+  shards_root: artifacts/shards
+  embeddings_root: artifacts/embeddings
+  outputs_root: outputs
+  transfer_root: transfer
+  manifest: artifacts/MANIFEST.json
+
+languages:
+  active: [en, ko]
+  # stubs for later expansion — see configs/languages/
+  registry: configs/languages/registry.yaml
+
+tasks:
+  active: [sts, retrieval, bitext]
+  # stubs for later — see configs/tasks/
+  registry: configs/tasks/registry.yaml
+  later: [clustering, classification, reranking]
+
+max_length: 512
+embedding_dim_teacher: 1024
+embedding_dim_student: 384
+
+datasets:
+  sts:
+    - name: sentence-transformers/stsb
+      lang: en
+      split: train
+      max_examples: 100000
+    - name: sentence-transformers/all-nli
+      lang: en
+      split: train
+      config: pair-score
+      max_examples: 250000
+    - name: kakaobrain/kor-nlu
+      lang: ko
+      split: train
+      config: korsts
+      max_examples: 100000
+    - name: kakaobrain/kor-nlu
+      lang: ko
+      split: train
+      config: kornli
+      max_examples: 200000
+  retrieval:
+    - name: sentence-transformers/msmarco-hard-negatives
+      lang: en
+      split: train
+      max_examples: 500000
+      max_negatives: 3
+    - name: miracl/miracl
+      lang: en
+      split: train
+      config: en
+      max_examples: 100000
+      max_negatives: 3
+    - name: miracl/miracl
+      lang: ko
+      split: train
+      config: ko
+      max_examples: 50000
+      max_negatives: 3
+    - name: castorini/mr-tydi
+      lang: ko
+      split: train
+      config: korean
+      max_examples: 50000
+      max_negatives: 1
+  bitext:
+    - name: sentence-transformers/parallel-sentences-tatoeba
+      lang: en-ko
+      split: train
+      config: en-ko
+      max_examples: 500000
+
+caps:
+  max_unique_texts: 2000000
+  examples_per_shard: 100000
+
+prompts:
+  teacher:
+    sts_query: "Instruct: Retrieve semantically similar text\nQuery: "
+    web_search_query: "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
+    bitext_query: "Instruct: Retrieve parallel sentences\nQuery: "
+    document: ""
+  student:
+    sts: "sts: "
+    ret: "ret: "
+    bitext: "bitext: "
+    document: ""
+
+loss:
+  lambda_kl: 1.0
+  lambda_focal: 0.5
+  lambda_disp: 0.05
+  temperature: 0.05
+  focal_gamma: 2.0
+  disperse_t: 2.0
+
+train:
+  batch_size: 32          # examples per rank (each may expand to multiple texts)
+  target_embeddings_n: 256
+  num_workers: 4
+  max_steps: 50000
+  lr: 2.0e-5
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  grad_clip: 1.0
+  log_every: 50
+  save_every: 2000
+  seed: 42
+
+performance:
+  flash_attention_2: false
+  gradient_checkpointing: true
+  pin_memory: true
+  persistent_workers: true
+  non_blocking: true
+  tf32: true
+  cudnn_benchmark: true
+  fused_adamw: true
+  bf16: true
+  torch_compile: false
+
+embed:
+  batch_size: 64
+  dtype: bf16
+
+eval:
+  stsb_split: validation
+  korsts_split: validation
+  retrieval_proxy_size: 512
