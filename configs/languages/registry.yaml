@@ -1,0 +1,35 @@
+# Language registry — v1 activates en/ko; add entries here for later expansion.
+languages:
+  en:
+    name: English
+    iso: en
+    enabled: true
+  ko:
+    name: Korean
+    iso: ko
+    enabled: true
+  # --- later stubs ---
+  ja:
+    name: Japanese
+    iso: ja
+    enabled: false
+  zh:
+    name: Chinese
+    iso: zh
+    enabled: false
+  de:
+    name: German
+    iso: de
+    enabled: false
+  fr:
+    name: French
+    iso: fr
+    enabled: false
+  es:
+    name: Spanish
+    iso: es
+    enabled: false
+  ar:
+    name: Arabic
+    iso: ar
+    enabled: false

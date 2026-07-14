@@ -1,0 +1,13 @@
+artifacts/
+transfer/
+outputs/
+*.tar
+*.sha256
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+.mypy_cache/
+teacher_emb*.memmap
+.DS_Store
