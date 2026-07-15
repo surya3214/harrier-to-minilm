@@ -62,6 +62,12 @@ def eval_sts(model, prompt_map, examples, device, lang_filter: str | None = None
         labels.append(float(label))
     if len(labels) < 3:
         return {"n": len(labels), "spearman": None}
+    if len(labels) < 50:
+        print(
+            f"WARNING: only {len(labels)} labeled STS pairs"
+            + (f" for lang={lang_filter}" if lang_filter else "")
+            + "; Spearman may be noisy."
+        )
     ea = encode(model, pairs_a, device)
     eb = encode(model, pairs_b, device)
     sims = np.sum(ea * eb, axis=1)

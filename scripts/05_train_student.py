@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Multi-GPU student distillation with KL + focal InfoNCE + disperse."""
+"""Multi-GPU student distillation with pad-safe KL + focal InfoNCE + disperse + STS MSE."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from pathlib import Path
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
-from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -111,8 +110,9 @@ def main() -> None:
     loss_fn = DistillLossBundle(
         lambda_kl=float(loss_cfg.get("lambda_kl", 1.0)),
         lambda_focal=float(loss_cfg.get("lambda_focal", 0.5)),
-        lambda_disp=float(loss_cfg.get("lambda_disp", 0.05)),
-        temperature=float(loss_cfg.get("temperature", 0.05)),
+        lambda_disp=float(loss_cfg.get("lambda_disp", 0.01)),
+        lambda_sts=float(loss_cfg.get("lambda_sts", 1.0)),
+        temperature=float(loss_cfg.get("temperature", 0.07)),
         focal_gamma=float(loss_cfg.get("focal_gamma", 2.0)),
         disperse_t=float(loss_cfg.get("disperse_t", 2.0)),
     )
@@ -131,7 +131,8 @@ def main() -> None:
     if is_main(rank):
         print(
             f"Training student from {student_path} | world_size={world_size} "
-            f"| FA2={perf.get('flash_attention_2', False)} | max_steps={max_steps}"
+            f"| FA2={perf.get('flash_attention_2', False)} | max_steps={max_steps} "
+            f"| lambda_sts={loss_cfg.get('lambda_sts', 1.0)} tau={loss_cfg.get('temperature', 0.07)}"
         )
 
     t0 = time.time()
@@ -148,11 +149,12 @@ def main() -> None:
             tok = move_batch(tok, device, non_blocking)
             teacher_emb = batch["teacher_emb"].to(device, non_blocking=non_blocking)
             pos_mask = batch["positive_mask"].to(device, non_blocking=non_blocking)
+            # STS pairs stay local-rank only (plan); indices refer to pre-pad local positions
+            sts_pairs = batch["sts_pairs"].to(device=device, dtype=torch.long)
 
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_bf16):
                 local_emb = student(tok["input_ids"], tok["attention_mask"])
 
-            # Pad to fixed N so DDP all-gather shapes match across ranks
             local_emb_f = local_emb.float()
             teacher_emb_f = teacher_emb.float()
             if local_emb_f.size(0) != teacher_emb_f.size(0):
@@ -166,6 +168,18 @@ def main() -> None:
             )
             pos_mask = apply_valid_mask_to_pos(pos_mask, valid)
 
+            # Filter STS pairs that still fall in the real (non-pad) local region
+            if sts_pairs.numel() > 0:
+                ok = (
+                    (sts_pairs[:, 0] < n0)
+                    & (sts_pairs[:, 1] < n0)
+                    & (sts_pairs[:, 0] >= 0)
+                    & (sts_pairs[:, 1] >= 0)
+                )
+                sts_pairs = sts_pairs[ok]
+            else:
+                sts_pairs = torch.zeros(0, 2, device=device, dtype=torch.long)
+
             global_student = all_gather_embeddings(local_emb_f, world_size)
             global_teacher = all_gather_embeddings(teacher_emb_f, world_size)
             global_mask = all_gather_mask(pos_mask, world_size)
@@ -174,7 +188,17 @@ def main() -> None:
             )
             global_mask = apply_valid_mask_to_pos(global_mask, global_valid)
 
-            out = loss_fn(global_student, global_teacher, global_mask)
+            # Offset local STS pairs into this rank's block of the gathered batch
+            if sts_pairs.numel() > 0 and world_size > 1:
+                sts_pairs = sts_pairs + rank * max_texts
+
+            out = loss_fn(
+                global_student,
+                global_teacher,
+                global_mask,
+                valid=global_valid,
+                sts_pairs=sts_pairs,
+            )
             loss = out["loss"]
 
             opt.zero_grad(set_to_none=True)
@@ -187,10 +211,12 @@ def main() -> None:
 
             if is_main(rank) and step % log_every == 0:
                 elapsed = time.time() - t0
+                n_valid = int(global_valid.sum().item())
                 print(
                     f"step={step} loss={loss.item():.4f} kl={out['loss_kl'].item():.4f} "
                     f"focal={out['loss_focal'].item():.4f} disp={out['loss_disp'].item():.4f} "
-                    f"lr={lr:.2e} n={global_student.size(0)} elapsed={elapsed:.1f}s"
+                    f"sts={out['loss_sts'].item():.4f} "
+                    f"lr={lr:.2e} n={global_student.size(0)} valid={n_valid} elapsed={elapsed:.1f}s"
                 )
 
             if is_main(rank) and step > 0 and step % save_every == 0:

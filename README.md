@@ -12,8 +12,9 @@ Air-gap-friendly pipeline: download on an internet host, transfer offline artifa
 - Max sequence length: **512**
 - Teacher prompts: full Harrier instruct templates
 - Student prompts: minimized tags (`sts:`, `ret:`, `bitext:`)
-- Losses: **KL similarity-matrix distillation** + **focal InfoNCE** + **disperse/uniformity**
+- Losses: **pad-safe KL similarity-matrix distillation** + **focal InfoNCE** + **light disperse** + **STS pair cosine MSE**
 - FlashAttention-2: **disabled by default**; `pin_memory`, fused AdamW, TF32, bf16, grad checkpointing enabled
+- STS roles: teacher query prompt on `sentence_a` only; `sentence_b` uses document embeddings (same as student)
 
 ## Layout
 
@@ -65,6 +66,20 @@ python scripts/06_smoke_eval.py --config configs/en_ko_sts_retrieval.yaml
 ```
 
 Single-GPU works without `torchrun` (plain `python scripts/04_...` / `05_...`).
+
+## Retrain note (loss fix)
+
+After pulling pad-safe / STS-MSE training changes, **retrain the student** (teacher memmaps do not need re-embedding unless you change prompt policy). Prior checkpoints trained without pad masking + STS MSE are not comparable.
+
+Suggested short validation:
+
+```bash
+torchrun --nproc_per_node=$N scripts/05_train_student.py \
+  --config configs/en_ko_sts_retrieval.yaml --max-steps 200
+python scripts/06_smoke_eval.py --config configs/en_ko_sts_retrieval.yaml
+```
+
+Watch `sts=` in the train log — it should drop; held-out STS Spearman should rise vs the previous plateau.
 
 ## Performance knobs
 
